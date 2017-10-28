@@ -96,6 +96,8 @@ public abstract class ContactSelectionActivity extends PassphraseRequiredActionB
 
     getSupportActionBar().setDisplayHomeAsUpEnabled(false);
     getSupportActionBar().setDisplayShowTitleEnabled(false);
+    getSupportActionBar().setIcon(null);
+    getSupportActionBar().setLogo(null);
   }
 
   private void initializeResources() {
@@ -114,7 +116,7 @@ public abstract class ContactSelectionActivity extends PassphraseRequiredActionB
 
   @Override
   public void onRefresh() {
-    new RefreshDirectoryTask(this).execute(getApplicationContext());
+    new RefreshDirectoryTask(this).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, getApplicationContext());
   }
 
   @Override

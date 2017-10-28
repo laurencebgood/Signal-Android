@@ -32,4 +32,14 @@ public class BitmapContactPhoto implements ContactPhoto {
   public Drawable asCallCard(Context context) {
     return new BitmapDrawable(context.getResources(), bitmap);
   }
+
+  @Override
+  public boolean isGenerated() {
+    return false;
+  }
+
+  @Override
+  public boolean isResource() {
+    return false;
+  }
 }

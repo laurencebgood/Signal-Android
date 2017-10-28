@@ -10,7 +10,7 @@ import org.thoughtcrime.securesms.TransportOptions;
 import org.thoughtcrime.securesms.TransportOptions.OnTransportChangedListener;
 import org.thoughtcrime.securesms.TransportOptionsPopup;
 import org.thoughtcrime.securesms.util.ViewUtil;
-import org.whispersystems.libaxolotl.util.guava.Optional;
+import org.whispersystems.libsignal.util.guava.Optional;
 
 public class SendButton extends ImageButton
     implements TransportOptions.OnTransportChangedListener,
@@ -83,14 +83,18 @@ public class SendButton extends ImageButton
     transportOptions.setDefaultTransport(type);
   }
 
+  public void setDefaultSubscriptionId(Optional<Integer> subscriptionId) {
+    transportOptions.setDefaultSubscriptionId(subscriptionId);
+  }
+
   @Override
   public void onSelected(TransportOption option) {
-    transportOptions.setSelectedTransport(option.getType());
+    transportOptions.setSelectedTransport(option);
     getTransportOptionsPopup().dismiss();
   }
 
   @Override
-  public void onChange(TransportOption newTransport) {
+  public void onChange(TransportOption newTransport, boolean isManualSelection) {
     setImageResource(newTransport.getDrawable());
     setContentDescription(newTransport.getDescription());
   }

@@ -52,7 +52,9 @@ import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 
 import org.thoughtcrime.securesms.ConversationListAdapter.ItemClickListener;
+import org.thoughtcrime.securesms.components.recyclerview.DeleteItemAnimator;
 import org.thoughtcrime.securesms.components.reminder.DefaultSmsReminder;
+import org.thoughtcrime.securesms.components.reminder.DozeReminder;
 import org.thoughtcrime.securesms.components.reminder.ExpiredBuildReminder;
 import org.thoughtcrime.securesms.components.reminder.OutdatedBuildReminder;
 import org.thoughtcrime.securesms.components.reminder.PushRegistrationReminder;
@@ -63,15 +65,18 @@ import org.thoughtcrime.securesms.components.reminder.ShareReminder;
 import org.thoughtcrime.securesms.components.reminder.SystemSmsImportReminder;
 import org.thoughtcrime.securesms.crypto.MasterSecret;
 import org.thoughtcrime.securesms.database.DatabaseFactory;
+import org.thoughtcrime.securesms.database.MessagingDatabase.MarkedMessageInfo;
 import org.thoughtcrime.securesms.database.loaders.ConversationListLoader;
+import org.thoughtcrime.securesms.notifications.MarkReadReceiver;
 import org.thoughtcrime.securesms.notifications.MessageNotifier;
-import org.thoughtcrime.securesms.recipients.Recipients;
+import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.util.Util;
 import org.thoughtcrime.securesms.util.ViewUtil;
 import org.thoughtcrime.securesms.util.task.SnackbarAsyncTask;
-import org.whispersystems.libaxolotl.util.guava.Optional;
+import org.whispersystems.libsignal.util.guava.Optional;
 
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
@@ -119,6 +124,7 @@ public class ConversationListFragment extends Fragment
 
     list.setHasFixedSize(true);
     list.setLayoutManager(new LinearLayoutManager(getActivity()));
+    list.setItemAnimator(new DeleteItemAnimator());
 
     new ItemTouchHelper(new ArchiveListenerCallback()).attachToRecyclerView(list);
 
@@ -179,6 +185,8 @@ public class ConversationListFragment extends Fragment
           return Optional.of((new PushRegistrationReminder(context, masterSecret)));
         } else if (ShareReminder.isEligible(context)) {
           return Optional.of(new ShareReminder(context));
+        } else if (DozeReminder.isEligible(context)) {
+          return Optional.of(new DozeReminder(context));
         } else {
           return Optional.absent();
         }
@@ -189,7 +197,7 @@ public class ConversationListFragment extends Fragment
           reminderView.showReminder(reminder.get());
         }
       }
-    }.execute(getActivity());
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, getActivity());
   }
 
   private void initializeListAdapter() {
@@ -240,7 +248,7 @@ public class ConversationListFragment extends Fragment
           else          DatabaseFactory.getThreadDatabase(getActivity()).archiveConversation(threadId);
         }
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
   }
 
   private void handleDeleteAllSelected() {
@@ -286,7 +294,7 @@ public class ConversationListFragment extends Fragment
                 actionMode = null;
               }
             }
-          }.execute();
+          }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
         }
       }
     });
@@ -301,8 +309,8 @@ public class ConversationListFragment extends Fragment
                                      getListAdapter().getBatchSelections().size()));
   }
 
-  private void handleCreateConversation(long threadId, Recipients recipients, int distributionType) {
-    ((ConversationSelectedListener)getActivity()).onCreateConversation(threadId, recipients, distributionType);
+  private void handleCreateConversation(long threadId, Recipient recipient, int distributionType, long lastSeen) {
+    ((ConversationSelectedListener)getActivity()).onCreateConversation(threadId, recipient, distributionType, lastSeen);
   }
 
   @Override
@@ -323,8 +331,8 @@ public class ConversationListFragment extends Fragment
   @Override
   public void onItemClick(ConversationListItem item) {
     if (actionMode == null) {
-      handleCreateConversation(item.getThreadId(), item.getRecipients(),
-                               item.getDistributionType());
+      handleCreateConversation(item.getThreadId(), item.getRecipient(),
+                               item.getDistributionType(), item.getLastSeen());
     } else {
       ConversationListAdapter adapter = (ConversationListAdapter)list.getAdapter();
       adapter.toggleThreadInBatchSet(item.getThreadId());
@@ -355,7 +363,7 @@ public class ConversationListFragment extends Fragment
   }
 
   public interface ConversationSelectedListener {
-    void onCreateConversation(long threadId, Recipients recipients, int distributionType);
+    void onCreateConversation(long threadId, Recipient recipient, int distributionType, long lastSeen);
     void onSwitchToArchive();
 }
 
@@ -455,7 +463,7 @@ public class ConversationListFragment extends Fragment
           protected void reverseAction(@Nullable Long parameter) {
             DatabaseFactory.getThreadDatabase(getActivity()).archiveConversation(threadId);
           }
-        }.execute(threadId);
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, threadId);
       } else {
         new SnackbarAsyncTask<Long>(getView(),
                                     getResources().getQuantityString(R.plurals.ConversationListFragment_conversations_archived, 1, 1),
@@ -468,8 +476,9 @@ public class ConversationListFragment extends Fragment
             DatabaseFactory.getThreadDatabase(getActivity()).archiveConversation(threadId);
 
             if (!read) {
-              DatabaseFactory.getThreadDatabase(getActivity()).setRead(threadId);
+              List<MarkedMessageInfo> messageIds = DatabaseFactory.getThreadDatabase(getActivity()).setRead(threadId, false);
               MessageNotifier.updateNotification(getActivity(), masterSecret);
+              MarkReadReceiver.process(getActivity(), messageIds);
             }
           }
 
@@ -482,7 +491,7 @@ public class ConversationListFragment extends Fragment
               MessageNotifier.updateNotification(getActivity(), masterSecret);
             }
           }
-        }.execute(threadId);
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, threadId);
       }
     }
 

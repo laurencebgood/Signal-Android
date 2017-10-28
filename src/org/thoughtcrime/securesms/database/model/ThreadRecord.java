@@ -28,9 +28,8 @@ import android.text.style.StyleSpan;
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.database.MmsSmsColumns;
 import org.thoughtcrime.securesms.database.SmsDatabase;
-import org.thoughtcrime.securesms.database.ThreadDatabase;
-import org.thoughtcrime.securesms.recipients.Recipients;
-import org.thoughtcrime.securesms.util.GroupUtil;
+import org.thoughtcrime.securesms.recipients.Recipient;
+import org.thoughtcrime.securesms.util.ExpirationUtil;
 
 /**
  * The message record model which represents thread heading messages.
@@ -46,19 +45,24 @@ public class ThreadRecord extends DisplayRecord {
   private           final boolean read;
   private           final int     distributionType;
   private           final boolean archived;
+  private           final long    expiresIn;
+  private           final long    lastSeen;
 
   public ThreadRecord(@NonNull Context context, @NonNull Body body, @Nullable Uri snippetUri,
-                      @NonNull Recipients recipients, long date, long count, boolean read,
-                      long threadId, int receiptCount, int status, long snippetType,
-                      int distributionType, boolean archived)
+                      @NonNull Recipient recipient, long date, long count, boolean read,
+                      long threadId, int deliveryReceiptCount, int status, long snippetType,
+                      int distributionType, boolean archived, long expiresIn, long lastSeen,
+                      int readReceiptCount)
   {
-    super(context, body, recipients, date, date, threadId, status, receiptCount, snippetType);
+    super(context, body, recipient, date, date, threadId, status, deliveryReceiptCount, snippetType, readReceiptCount);
     this.context          = context.getApplicationContext();
     this.snippetUri       = snippetUri;
     this.count            = count;
     this.read             = read;
     this.distributionType = distributionType;
     this.archived         = archived;
+    this.expiresIn        = expiresIn;
+    this.lastSeen         = lastSeen;
   }
 
   public @Nullable Uri getSnippetUri() {
@@ -70,7 +74,7 @@ public class ThreadRecord extends DisplayRecord {
     if (SmsDatabase.Types.isDecryptInProgressType(type)) {
       return emphasisAdded(context.getString(R.string.MessageDisplayHelper_decrypting_please_wait));
     } else if (isGroupUpdate()) {
-      return emphasisAdded(GroupUtil.getDescription(context, getBody().getBody()).toString());
+      return emphasisAdded(context.getString(R.string.ThreadRecord_group_updated));
     } else if (isGroupQuit()) {
       return emphasisAdded(context.getString(R.string.ThreadRecord_left_the_group));
     } else if (isKeyExchange()) {
@@ -95,7 +99,17 @@ public class ThreadRecord extends DisplayRecord {
     } else if (SmsDatabase.Types.isMissedCall(type)) {
       return emphasisAdded(context.getString(org.thoughtcrime.securesms.R.string.ThreadRecord_missed_call));
     } else if (SmsDatabase.Types.isJoinedType(type)) {
-      return emphasisAdded(context.getString(R.string.ThreadRecord_s_is_on_signal_say_hey, getRecipients().getPrimaryRecipient().toShortString()));
+      return emphasisAdded(context.getString(R.string.ThreadRecord_s_is_on_signal, getRecipient().toShortString()));
+    } else if (SmsDatabase.Types.isExpirationTimerUpdate(type)) {
+      String time = ExpirationUtil.getExpirationDisplayValue(context, (int) (getExpiresIn() / 1000));
+      return emphasisAdded(context.getString(R.string.ThreadRecord_disappearing_message_time_updated_to_s, time));
+    } else if (SmsDatabase.Types.isIdentityUpdate(type)) {
+      if (getRecipient().isGroupRecipient()) return emphasisAdded(context.getString(R.string.ThreadRecord_safety_number_changed));
+      else                                   return emphasisAdded(context.getString(R.string.ThreadRecord_your_safety_number_with_s_has_changed, getRecipient().toShortString()));
+    } else if (SmsDatabase.Types.isIdentityVerified(type)) {
+      return emphasisAdded(context.getString(R.string.ThreadRecord_you_marked_verified));
+    } else if (SmsDatabase.Types.isIdentityDefault(type)) {
+      return emphasisAdded(context.getString(R.string.ThreadRecord_you_marked_unverified));
     } else {
       if (TextUtils.isEmpty(getBody().getBody())) {
         return new SpannableString(emphasisAdded(context.getString(R.string.ThreadRecord_media_message)));
@@ -134,5 +148,13 @@ public class ThreadRecord extends DisplayRecord {
 
   public int getDistributionType() {
     return distributionType;
+  }
+
+  public long getExpiresIn() {
+    return expiresIn;
+  }
+
+  public long getLastSeen() {
+    return lastSeen;
   }
 }

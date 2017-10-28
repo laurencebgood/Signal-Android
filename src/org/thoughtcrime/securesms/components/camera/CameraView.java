@@ -48,7 +48,7 @@ import org.thoughtcrime.securesms.util.TextSecurePreferences;
 import org.thoughtcrime.securesms.util.Util;
 import org.whispersystems.jobqueue.Job;
 import org.whispersystems.jobqueue.JobParameters;
-import org.whispersystems.libaxolotl.util.guava.Optional;
+import org.whispersystems.libsignal.util.guava.Optional;
 
 @SuppressWarnings("deprecation")
 public class CameraView extends ViewGroup {
@@ -450,7 +450,7 @@ public class CameraView extends ViewGroup {
         Log.w(TAG, "previewFormat: " + camera.getParameters().getPreviewFormat());
         Log.w(TAG, "croppingRect: " + croppingRect.toString());
         Log.w(TAG, "rotation: " + rotation);
-        new CaptureTask(previewSize, rotation, croppingRect).execute(data);
+        new CaptureTask(previewSize, rotation, croppingRect).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, data);
       }
     });
   }

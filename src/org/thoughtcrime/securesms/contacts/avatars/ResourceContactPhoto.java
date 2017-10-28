@@ -2,12 +2,11 @@ package org.thoughtcrime.securesms.contacts.avatars;
 
 import android.content.Context;
 import android.graphics.Color;
-import android.graphics.ColorFilter;
 import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.LayerDrawable;
 import android.support.annotation.DrawableRes;
-import android.support.v4.graphics.ColorUtils;
+import android.support.v7.content.res.AppCompatResources;
 import android.widget.ImageView;
 
 import com.amulyakhare.textdrawable.TextDrawable;
@@ -16,9 +15,15 @@ import com.makeramen.roundedimageview.RoundedDrawable;
 public class ResourceContactPhoto implements ContactPhoto {
 
   private final int resourceId;
+  private final int callCardResourceId;
 
   ResourceContactPhoto(@DrawableRes int resourceId) {
-    this.resourceId = resourceId;
+    this(resourceId, resourceId);
+  }
+
+  ResourceContactPhoto(@DrawableRes int resourceId, @DrawableRes int callCardResourceId) {
+    this.resourceId         = resourceId;
+    this.callCardResourceId = callCardResourceId;
   }
 
   @Override
@@ -42,7 +47,17 @@ public class ResourceContactPhoto implements ContactPhoto {
 
   @Override
   public Drawable asCallCard(Context context) {
-    return context.getResources().getDrawable(resourceId);
+    return AppCompatResources.getDrawable(context, callCardResourceId);
+  }
+
+  @Override
+  public boolean isGenerated() {
+    return false;
+  }
+
+  @Override
+  public boolean isResource() {
+    return true;
   }
 
   private static class ExpandingLayerDrawable extends LayerDrawable {

@@ -2,10 +2,12 @@ package org.thoughtcrime.securesms.components;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.net.Uri;
 import android.os.Build;
-import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.v4.view.ViewCompat;
+import android.text.format.DateUtils;
 import android.util.AttributeSet;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -20,9 +22,9 @@ import android.widget.Toast;
 
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.components.emoji.EmojiDrawer;
-import org.thoughtcrime.securesms.components.emoji.EmojiEditText;
 import org.thoughtcrime.securesms.components.emoji.EmojiToggle;
 import org.thoughtcrime.securesms.util.TextSecurePreferences;
+import org.thoughtcrime.securesms.util.Util;
 import org.thoughtcrime.securesms.util.ViewUtil;
 import org.thoughtcrime.securesms.util.concurrent.AssertedSuccessListener;
 import org.thoughtcrime.securesms.util.concurrent.ListenableFuture;
@@ -32,14 +34,17 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class InputPanel extends LinearLayout
-    implements MicrophoneRecorderView.Listener, KeyboardAwareLinearLayout.OnKeyboardShownListener, EmojiDrawer.EmojiEventListener {
+    implements MicrophoneRecorderView.Listener,
+               KeyboardAwareLinearLayout.OnKeyboardShownListener,
+               EmojiDrawer.EmojiEventListener
+{
 
   private static final String TAG = InputPanel.class.getSimpleName();
 
   private static final int FADE_TIME = 150;
 
   private EmojiToggle   emojiToggle;
-  private EmojiEditText composeText;
+  private ComposeText   composeText;
   private View          quickCameraToggle;
   private View          quickAudioToggle;
   private View          buttonToggle;
@@ -80,10 +85,10 @@ public class InputPanel extends LinearLayout
     this.microphoneRecorderView = ViewUtil.findById(this, R.id.recorder_view);
     this.microphoneRecorderView.setListener(this);
 
-//    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN) {
       this.microphoneRecorderView.setVisibility(View.GONE);
       this.microphoneRecorderView.setClickable(false);
-//    }
+    }
 
     if (TextSecurePreferences.isSystemEmojiPreferred(getContext())) {
       emojiToggle.setVisibility(View.GONE);
@@ -94,16 +99,23 @@ public class InputPanel extends LinearLayout
     }
   }
 
-  public void setListener(final @NonNull Listener listener, @NonNull EmojiDrawer emojiDrawer) {
+  public void setListener(final @NonNull Listener listener) {
     this.listener = listener;
 
-    emojiToggle.attach(emojiDrawer);
     emojiToggle.setOnClickListener(new OnClickListener() {
       @Override
       public void onClick(View v) {
         listener.onEmojiToggle();
       }
     });
+  }
+
+  public void setMediaListener(@NonNull MediaListener listener) {
+    composeText.setMediaListener(listener);
+  }
+
+  public void setEmojiDrawer(@NonNull EmojiDrawer emojiDrawer) {
+    emojiToggle.attach(emojiDrawer);
   }
 
   @Override
@@ -138,7 +150,12 @@ public class InputPanel extends LinearLayout
   public void onRecordMoved(float x, float absoluteX) {
     slideToCancel.moveTo(x);
 
-    if (absoluteX / recordingContainer.getWidth() <= 0.5) {
+    int   direction = ViewCompat.getLayoutDirection(this);
+    float position  = absoluteX / recordingContainer.getWidth();
+
+    if (direction == ViewCompat.LAYOUT_DIRECTION_LTR && position <= 0.5 ||
+        direction == ViewCompat.LAYOUT_DIRECTION_RTL && position >= 0.6)
+    {
       this.microphoneRecorderView.cancelAction();
     }
   }
@@ -217,7 +234,7 @@ public class InputPanel extends LinearLayout
 
     public ListenableFuture<Void> hide(float x) {
       final SettableFuture<Void> future = new SettableFuture<>();
-      float offset = -Math.max(0, this.startPositionX - x);
+      float offset = getOffset(x);
 
       AnimationSet animation = new AnimationSet(true);
       animation.addAnimation(new TranslateAnimation(Animation.ABSOLUTE, offset,
@@ -247,7 +264,7 @@ public class InputPanel extends LinearLayout
     }
 
     public void moveTo(float x) {
-      float     offset    = -Math.max(0, this.startPositionX - x);
+      float     offset    = getOffset(x);
       Animation animation = new TranslateAnimation(Animation.ABSOLUTE, offset,
                                                    Animation.ABSOLUTE, offset,
                                                    Animation.RELATIVE_TO_SELF, 0,
@@ -260,14 +277,17 @@ public class InputPanel extends LinearLayout
       slideToCancelView.startAnimation(animation);
     }
 
+    private float getOffset(float x) {
+      return ViewCompat.getLayoutDirection(slideToCancelView) == ViewCompat.LAYOUT_DIRECTION_LTR ?
+          -Math.max(0, this.startPositionX - x) : Math.max(0, x - this.startPositionX);
+    }
+
   }
 
   private static class RecordTime implements Runnable {
 
     private final TextView recordTimeView;
-
     private final AtomicLong startTime = new AtomicLong(0);
-    private final Handler    handler   = new Handler();
 
     private RecordTime(TextView recordTimeView) {
       this.recordTimeView = recordTimeView;
@@ -275,9 +295,9 @@ public class InputPanel extends LinearLayout
 
     public void display() {
       this.startTime.set(System.currentTimeMillis());
-      this.recordTimeView.setText("00:00");
+      this.recordTimeView.setText(DateUtils.formatElapsedTime(0));
       ViewUtil.fadeIn(this.recordTimeView, FADE_TIME);
-      handler.postDelayed(this, TimeUnit.SECONDS.toMillis(1));
+      Util.runOnMainDelayed(this, TimeUnit.SECONDS.toMillis(1));
     }
 
     public long hide() {
@@ -292,12 +312,13 @@ public class InputPanel extends LinearLayout
       long localStartTime = startTime.get();
       if (localStartTime > 0) {
         long elapsedTime = System.currentTimeMillis() - localStartTime;
-        recordTimeView.setText(String.format("%02d:%02d",
-                                             TimeUnit.MILLISECONDS.toMinutes(elapsedTime),
-                                             TimeUnit.MILLISECONDS.toSeconds(elapsedTime) -
-                                             TimeUnit.MINUTES.toSeconds(TimeUnit.MILLISECONDS.toMinutes(elapsedTime))));
-        handler.postDelayed(this, TimeUnit.SECONDS.toMillis(1));
+        recordTimeView.setText(DateUtils.formatElapsedTime(TimeUnit.MILLISECONDS.toSeconds(elapsedTime)));
+        Util.runOnMainDelayed(this, TimeUnit.SECONDS.toMillis(1));
       }
     }
+  }
+
+  public interface MediaListener {
+    public void onMediaSelected(@NonNull Uri uri, String contentType);
   }
 }

@@ -3,6 +3,7 @@ package org.thoughtcrime.securesms.contacts;
 import android.content.Context;
 import android.text.TextUtils;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.View;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
@@ -10,12 +11,15 @@ import android.widget.TextView;
 
 import org.thoughtcrime.securesms.R;
 import org.thoughtcrime.securesms.components.AvatarImageView;
+import org.thoughtcrime.securesms.database.Address;
 import org.thoughtcrime.securesms.recipients.Recipient;
-import org.thoughtcrime.securesms.recipients.RecipientFactory;
-import org.thoughtcrime.securesms.recipients.Recipients;
+import org.thoughtcrime.securesms.recipients.RecipientModifiedListener;
+import org.thoughtcrime.securesms.util.Util;
 import org.thoughtcrime.securesms.util.ViewUtil;
 
-public class ContactSelectionListItem extends LinearLayout implements Recipients.RecipientsModifiedListener {
+public class ContactSelectionListItem extends LinearLayout implements RecipientModifiedListener {
+
+  private static final String TAG = ContactSelectionListItem.class.getSimpleName();
 
   private AvatarImageView contactPhotoImage;
   private TextView        numberView;
@@ -23,9 +27,9 @@ public class ContactSelectionListItem extends LinearLayout implements Recipients
   private TextView        labelView;
   private CheckBox        checkBox;
 
-  private long       id;
-  private String     number;
-  private Recipients recipients;
+  private long      id;
+  private String    number;
+  private Recipient recipient;
 
   public ContactSelectionListItem(Context context) {
     super(context);
@@ -52,23 +56,21 @@ public class ContactSelectionListItem extends LinearLayout implements Recipients
     this.number = number;
 
     if (type == ContactsDatabase.NEW_TYPE) {
-      this.recipients = null;
-      this.contactPhotoImage.setAvatar(Recipient.getUnknownRecipient(), false);
+      this.recipient = null;
+      this.contactPhotoImage.setAvatar(Recipient.from(getContext(), Address.UNKNOWN, true), false);
     } else if (!TextUtils.isEmpty(number)) {
-      this.recipients = RecipientFactory.getRecipientsFromString(getContext(), number, true);
+      Address address = Address.fromExternal(getContext(), number);
+      this.recipient = Recipient.from(getContext(), address, true);
+      this.recipient.addListener(this);
 
-      if (this.recipients.getPrimaryRecipient() != null &&
-          this.recipients.getPrimaryRecipient().getName() != null)
-      {
-        name = this.recipients.getPrimaryRecipient().getName();
+      if (this.recipient.getName() != null) {
+        name = this.recipient.getName();
       }
-
-      this.recipients.addListener(this);
     }
 
     this.nameView.setTextColor(color);
     this.numberView.setTextColor(color);
-    this.contactPhotoImage.setAvatar(recipients, false);
+    this.contactPhotoImage.setAvatar(recipient, false);
 
     setText(type, name, number, label);
 
@@ -81,9 +83,9 @@ public class ContactSelectionListItem extends LinearLayout implements Recipients
   }
 
   public void unbind() {
-    if (recipients != null) {
-      recipients.removeListener(this);
-      recipients = null;
+    if (recipient != null) {
+      recipient.removeListener(this);
+      recipient = null;
     }
   }
 
@@ -115,14 +117,11 @@ public class ContactSelectionListItem extends LinearLayout implements Recipients
   }
 
   @Override
-  public void onModified(final Recipients recipients) {
-    if (this.recipients == recipients) {
-      this.contactPhotoImage.post(new Runnable() {
-        @Override
-        public void run() {
-          contactPhotoImage.setAvatar(recipients, false);
-          nameView.setText(recipients.toShortString());
-        }
+  public void onModified(final Recipient recipient) {
+    if (this.recipient == recipient) {
+      Util.runOnMain(() -> {
+        contactPhotoImage.setAvatar(recipient, false);
+        nameView.setText(recipient.toShortString());
       });
     }
   }

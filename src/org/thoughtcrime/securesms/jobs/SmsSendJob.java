@@ -4,6 +4,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.telephony.PhoneNumberUtils;
 import android.telephony.SmsManager;
 import android.util.Log;
@@ -12,13 +13,12 @@ import org.thoughtcrime.securesms.crypto.MasterSecret;
 import org.thoughtcrime.securesms.database.DatabaseFactory;
 import org.thoughtcrime.securesms.database.EncryptingSmsDatabase;
 import org.thoughtcrime.securesms.database.NoSuchMessageException;
-import org.thoughtcrime.securesms.database.SmsDatabase;
 import org.thoughtcrime.securesms.database.model.SmsMessageRecord;
 import org.thoughtcrime.securesms.jobs.requirements.MasterSecretRequirement;
 import org.thoughtcrime.securesms.jobs.requirements.NetworkOrServiceRequirement;
 import org.thoughtcrime.securesms.jobs.requirements.ServiceRequirement;
 import org.thoughtcrime.securesms.notifications.MessageNotifier;
-import org.thoughtcrime.securesms.recipients.Recipients;
+import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.service.SmsDeliveryListener;
 import org.thoughtcrime.securesms.transport.UndeliverableMessageException;
 import org.thoughtcrime.securesms.util.NumberUtil;
@@ -39,10 +39,7 @@ public class SmsSendJob extends SendJob {
   }
 
   @Override
-  public void onAdded() {
-    SmsDatabase database = DatabaseFactory.getEncryptingSmsDatabase(context);
-    database.markAsSending(messageId);
-  }
+  public void onAdded() {}
 
   @Override
   public void onSend(MasterSecret masterSecret) throws NoSuchMessageException {
@@ -56,7 +53,7 @@ public class SmsSendJob extends SendJob {
     } catch (UndeliverableMessageException ude) {
       Log.w(TAG, ude);
       DatabaseFactory.getSmsDatabase(context).markAsSentFailed(record.getId());
-      MessageNotifier.notifyMessageDeliveryFailed(context, record.getRecipients(), record.getThreadId());
+      MessageNotifier.notifyMessageDeliveryFailed(context, record.getRecipient(), record.getThreadId());
     }
   }
 
@@ -68,11 +65,11 @@ public class SmsSendJob extends SendJob {
   @Override
   public void onCanceled() {
     Log.w(TAG, "onCanceled()");
-    long       threadId   = DatabaseFactory.getSmsDatabase(context).getThreadIdForMessage(messageId);
-    Recipients recipients = DatabaseFactory.getThreadDatabase(context).getRecipientsForThreadId(threadId);
+    long      threadId  = DatabaseFactory.getSmsDatabase(context).getThreadIdForMessage(messageId);
+    Recipient recipient = DatabaseFactory.getThreadDatabase(context).getRecipientForThreadId(threadId);
 
     DatabaseFactory.getSmsDatabase(context).markAsSentFailed(messageId);
-    MessageNotifier.notifyMessageDeliveryFailed(context, recipients, threadId);
+    MessageNotifier.notifyMessageDeliveryFailed(context, recipient, threadId);
   }
 
   private void deliver(SmsMessageRecord message)
@@ -82,7 +79,7 @@ public class SmsSendJob extends SendJob {
       throw new UndeliverableMessageException("Trying to send a secure SMS?");
     }
 
-    String recipient = message.getIndividualRecipient().getNumber();
+    String recipient = message.getIndividualRecipient().getAddress().serialize();
 
     // See issue #1516 for bug report, and discussion on commits related to #4833 for problems
     // related to the original fix to #1516. This still may not be a correct fix if networks allow
@@ -105,19 +102,19 @@ public class SmsSendJob extends SendJob {
     // catching it and marking the message as a failure.  That way at least it doesn't
     // repeatedly crash every time you start the app.
     try {
-      SmsManager.getDefault().sendMultipartTextMessage(recipient, null, messages, sentIntents, deliveredIntents);
-    } catch (NullPointerException npe) {
+      getSmsManagerFor(message.getSubscriptionId()).sendMultipartTextMessage(recipient, null, messages, sentIntents, deliveredIntents);
+    } catch (NullPointerException | IllegalArgumentException npe) {
       Log.w(TAG, npe);
       Log.w(TAG, "Recipient: " + recipient);
       Log.w(TAG, "Message Parts: " + messages.size());
 
       try {
         for (int i=0;i<messages.size();i++) {
-          SmsManager.getDefault().sendTextMessage(recipient, null, messages.get(i),
-                                                  sentIntents.get(i),
-                                                  deliveredIntents == null ? null : deliveredIntents.get(i));
+          getSmsManagerFor(message.getSubscriptionId()).sendTextMessage(recipient, null, messages.get(i),
+                                                                        sentIntents.get(i),
+                                                                        deliveredIntents == null ? null : deliveredIntents.get(i));
         }
-      } catch (NullPointerException npe2) {
+      } catch (NullPointerException | IllegalArgumentException npe2) {
         Log.w(TAG, npe);
         throw new UndeliverableMessageException(npe2);
       }
@@ -177,6 +174,14 @@ public class SmsSendJob extends SendJob {
     pending.putExtra("message_id", messageId);
 
     return pending;
+  }
+
+  private SmsManager getSmsManagerFor(int subscriptionId) {
+    if (Build.VERSION.SDK_INT >= 22 && subscriptionId != -1) {
+      return SmsManager.getSmsManagerForSubscriptionId(subscriptionId);
+    } else {
+      return SmsManager.getDefault();
+    }
   }
 
   private static JobParameters constructParameters(Context context, String name) {

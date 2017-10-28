@@ -84,7 +84,7 @@ public class ConversationPopupActivity extends ConversationActivity {
           public void onSuccess(Long result) {
             ActivityOptionsCompat transition = ActivityOptionsCompat.makeScaleUpAnimation(getWindow().getDecorView(), 0, 0, getWindow().getAttributes().width, getWindow().getAttributes().height);
             Intent intent = new Intent(ConversationPopupActivity.this, ConversationActivity.class);
-            intent.putExtra(ConversationActivity.RECIPIENTS_EXTRA, getRecipients().getIds());
+            intent.putExtra(ConversationActivity.ADDRESS_EXTRA, getRecipient().getAddress());
             intent.putExtra(ConversationActivity.THREAD_ID_EXTRA, result);
 
             if (VERSION.SDK_INT >= VERSION_CODES.JELLY_BEAN) {
@@ -121,7 +121,9 @@ public class ConversationPopupActivity extends ConversationActivity {
   }
 
   @Override
-  protected void updateInviteReminder() {
-    reminderView.setVisibility(View.GONE);
+  protected void updateInviteReminder(boolean seenInvite) {
+    if (reminderView.resolved()) {
+      reminderView.get().setVisibility(View.GONE);
+    }
   }
 }

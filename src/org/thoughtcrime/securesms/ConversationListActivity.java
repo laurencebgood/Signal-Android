@@ -16,6 +16,8 @@
  */
 package org.thoughtcrime.securesms;
 
+import android.content.ActivityNotFoundException;
+import android.content.Context;
 import android.content.Intent;
 import android.database.ContentObserver;
 import android.net.Uri;
@@ -23,25 +25,29 @@ import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.ContactsContract;
 import android.support.annotation.NonNull;
-import android.support.v7.app.ActionBar;
-import android.util.Log;
 import android.support.v4.view.MenuItemCompat;
+import android.support.v7.app.ActionBar;
 import android.support.v7.widget.SearchView;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
+import android.widget.Toast;
 
 import org.thoughtcrime.securesms.components.RatingManager;
 import org.thoughtcrime.securesms.crypto.MasterSecret;
 import org.thoughtcrime.securesms.database.DatabaseFactory;
+import org.thoughtcrime.securesms.database.MessagingDatabase;
+import org.thoughtcrime.securesms.database.MessagingDatabase.MarkedMessageInfo;
+import org.thoughtcrime.securesms.notifications.MarkReadReceiver;
 import org.thoughtcrime.securesms.notifications.MessageNotifier;
-import org.thoughtcrime.securesms.recipients.RecipientFactory;
-import org.thoughtcrime.securesms.recipients.Recipients;
-import org.thoughtcrime.securesms.service.DirectoryRefreshListener;
+import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.service.KeyCachingService;
 import org.thoughtcrime.securesms.util.DynamicLanguage;
 import org.thoughtcrime.securesms.util.DynamicTheme;
 import org.thoughtcrime.securesms.util.TextSecurePreferences;
+
+import java.util.List;
 
 public class ConversationListActivity extends PassphraseRequiredActionBarActivity
     implements ConversationListFragment.ConversationSelectedListener
@@ -71,7 +77,6 @@ public class ConversationListActivity extends PassphraseRequiredActionBarActivit
 
     initializeContactUpdatesReceiver();
 
-    DirectoryRefreshListener.schedule(this);
     RatingManager.showRatingDialogIfNecessary(this);
   }
 
@@ -160,11 +165,13 @@ public class ConversationListActivity extends PassphraseRequiredActionBarActivit
   }
 
   @Override
-  public void onCreateConversation(long threadId, Recipients recipients, int distributionType) {
+  public void onCreateConversation(long threadId, Recipient recipient, int distributionType, long lastSeen) {
     Intent intent = new Intent(this, ConversationActivity.class);
-    intent.putExtra(ConversationActivity.RECIPIENTS_EXTRA, recipients.getIds());
+    intent.putExtra(ConversationActivity.ADDRESS_EXTRA, recipient.getAddress());
     intent.putExtra(ConversationActivity.THREAD_ID_EXTRA, threadId);
     intent.putExtra(ConversationActivity.DISTRIBUTION_TYPE_EXTRA, distributionType);
+    intent.putExtra(ConversationActivity.TIMING_EXTRA, System.currentTimeMillis());
+    intent.putExtra(ConversationActivity.LAST_SEEN_EXTRA, lastSeen);
 
     startActivity(intent);
     overridePendingTransition(R.anim.slide_from_right, R.anim.fade_scale_out);
@@ -200,11 +207,15 @@ public class ConversationListActivity extends PassphraseRequiredActionBarActivit
     new AsyncTask<Void, Void, Void>() {
       @Override
       protected Void doInBackground(Void... params) {
-        DatabaseFactory.getThreadDatabase(ConversationListActivity.this).setAllThreadsRead();
-        MessageNotifier.updateNotification(ConversationListActivity.this, masterSecret);
+        Context                 context    = ConversationListActivity.this;
+        List<MarkedMessageInfo> messageIds = DatabaseFactory.getThreadDatabase(context).setAllThreadsRead();
+
+        MessageNotifier.updateNotification(context, masterSecret);
+        MarkReadReceiver.process(context, messageIds);
+
         return null;
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
   }
 
   private void handleInvite() {
@@ -212,7 +223,11 @@ public class ConversationListActivity extends PassphraseRequiredActionBarActivit
   }
 
   private void handleHelp() {
-    startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("http://support.whispersystems.org")));
+    try {
+      startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://support.whispersystems.org")));
+    } catch (ActivityNotFoundException e) {
+      Toast.makeText(this, R.string.ConversationListActivity_there_is_no_browser_installed_on_your_device, Toast.LENGTH_LONG).show();
+    }
   }
 
   private void initializeContactUpdatesReceiver() {
@@ -221,7 +236,7 @@ public class ConversationListActivity extends PassphraseRequiredActionBarActivit
       public void onChange(boolean selfChange) {
         super.onChange(selfChange);
         Log.w(TAG, "Detected android contact data changed, refreshing cache");
-        RecipientFactory.clearCache();
+        Recipient.clearCache(ConversationListActivity.this);
         ConversationListActivity.this.runOnUiThread(new Runnable() {
           @Override
           public void run() {

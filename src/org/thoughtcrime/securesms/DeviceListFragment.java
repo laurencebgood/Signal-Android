@@ -3,6 +3,7 @@ package org.thoughtcrime.securesms;
 import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v4.app.ListFragment;
 import android.support.v4.app.LoaderManager;
@@ -25,8 +26,8 @@ import org.thoughtcrime.securesms.dependencies.InjectableType;
 import org.thoughtcrime.securesms.util.task.ProgressDialogAsyncTask;
 import org.thoughtcrime.securesms.util.TextSecurePreferences;
 import org.thoughtcrime.securesms.util.ViewUtil;
-import org.whispersystems.textsecure.api.TextSecureAccountManager;
-import org.whispersystems.textsecure.api.messages.multidevice.DeviceInfo;
+import org.whispersystems.signalservice.api.SignalServiceAccountManager;
+import org.whispersystems.signalservice.api.messages.multidevice.DeviceInfo;
 
 import java.io.IOException;
 import java.util.List;
@@ -42,7 +43,7 @@ public class DeviceListFragment extends ListFragment
   private static final String TAG = DeviceListFragment.class.getSimpleName();
 
   @Inject
-  TextSecureAccountManager accountManager;
+  SignalServiceAccountManager accountManager;
 
   private Locale                 locale;
   private View                   empty;
@@ -77,7 +78,7 @@ public class DeviceListFragment extends ListFragment
   @Override
   public void onActivityCreated(Bundle bundle) {
     super.onActivityCreated(bundle);
-    getLoaderManager().initLoader(0, null, this).forceLoad();
+    getLoaderManager().initLoader(0, null, this);
     getListView().setOnItemClickListener(this);
   }
 
@@ -142,10 +143,23 @@ public class DeviceListFragment extends ListFragment
                               new DialogInterface.OnClickListener() {
       @Override
       public void onClick(DialogInterface dialog, int which) {
-        getLoaderManager().getLoader(0).forceLoad();
-        getLoaderManager().initLoader(0, null, DeviceListFragment.this);
+        getLoaderManager().restartLoader(0, null, DeviceListFragment.this);
       }
     });
+
+    builder.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
+      @Override
+      public void onClick(DialogInterface dialog, int which) {
+        DeviceListFragment.this.getActivity().onBackPressed();
+      }
+    });
+    builder.setOnCancelListener(new DialogInterface.OnCancelListener() {
+      @Override
+      public void onCancel(DialogInterface dialog) {
+        DeviceListFragment.this.getActivity().onBackPressed();
+      }
+    });
+
     builder.show();
   }
 
@@ -170,7 +184,7 @@ public class DeviceListFragment extends ListFragment
         super.onPostExecute(result);
         getLoaderManager().restartLoader(0, null, DeviceListFragment.this);
       }
-    }.execute();
+    }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
   }
 
   @Override

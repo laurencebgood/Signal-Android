@@ -19,10 +19,15 @@ package org.thoughtcrime.securesms;
 
 import android.content.Context;
 import android.content.Intent;
+import android.database.Cursor;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Parcel;
+import android.os.Process;
+import android.provider.OpenableColumns;
 import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -31,14 +36,17 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.thoughtcrime.securesms.crypto.MasterSecret;
+import org.thoughtcrime.securesms.database.Address;
 import org.thoughtcrime.securesms.mms.PartAuthority;
 import org.thoughtcrime.securesms.providers.PersistentBlobProvider;
-import org.thoughtcrime.securesms.recipients.Recipients;
+import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.util.DynamicLanguage;
 import org.thoughtcrime.securesms.util.DynamicTheme;
+import org.thoughtcrime.securesms.util.FileUtils;
 import org.thoughtcrime.securesms.util.MediaUtil;
 import org.thoughtcrime.securesms.util.ViewUtil;
 
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -52,6 +60,10 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
 {
   private static final String TAG = ShareActivity.class.getSimpleName();
 
+  public static final String EXTRA_THREAD_ID          = "thread_id";
+  public static final String EXTRA_ADDRESS_MARSHALLED = "address_marshalled";
+  public static final String EXTRA_DISTRIBUTION_TYPE  = "distribution_type";
+
   private final DynamicTheme    dynamicTheme    = new DynamicTheme   ();
   private final DynamicLanguage dynamicLanguage = new DynamicLanguage();
 
@@ -59,6 +71,7 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
   private ViewGroup    fragmentContainer;
   private View         progressWheel;
   private Uri          resolvedExtra;
+  private String       mimeType;
   private boolean      isPassingAlongMedia;
 
   @Override
@@ -81,6 +94,7 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
 
   @Override
   protected void onNewIntent(Intent intent) {
+    Log.w(TAG, "onNewIntent()");
     super.onNewIntent(intent);
     setIntent(intent);
     initializeMedia();
@@ -88,6 +102,7 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
 
   @Override
   public void onResume() {
+    Log.w(TAG, "onResume()");
     super.onResume();
     dynamicTheme.onResume(this);
     dynamicLanguage.onResume(this);
@@ -110,15 +125,16 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
     isPassingAlongMedia = false;
 
     Uri streamExtra = getIntent().getParcelableExtra(Intent.EXTRA_STREAM);
+    mimeType        = getMimeType(streamExtra);
+
     if (streamExtra != null && PartAuthority.isLocalUri(streamExtra)) {
       isPassingAlongMedia = true;
       resolvedExtra       = streamExtra;
-      fragmentContainer.setVisibility(View.VISIBLE);
-      progressWheel.setVisibility(View.GONE);
+      handleResolvedMedia(getIntent(), false);
     } else {
       fragmentContainer.setVisibility(View.GONE);
       progressWheel.setVisibility(View.VISIBLE);
-      new ResolveMediaTask(context).execute(streamExtra);
+      new ResolveMediaTask(context).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, streamExtra);
     }
   }
 
@@ -149,13 +165,40 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
   }
 
   @Override
-  public void onCreateConversation(long threadId, Recipients recipients, int distributionType) {
-    createConversation(threadId, recipients, distributionType);
+  public void onCreateConversation(long threadId, Recipient recipient, int distributionType) {
+    createConversation(threadId, recipient.getAddress(), distributionType);
   }
 
-  private void createConversation(long threadId, Recipients recipients, int distributionType) {
+  private void handleResolvedMedia(Intent intent, boolean animate) {
+    long      threadId         = intent.getLongExtra(EXTRA_THREAD_ID, -1);
+    int       distributionType = intent.getIntExtra(EXTRA_DISTRIBUTION_TYPE, -1);
+    Address   address          = null;
+
+    if (intent.hasExtra(EXTRA_ADDRESS_MARSHALLED)) {
+      Parcel parcel = Parcel.obtain();
+      byte[] marshalled = intent.getByteArrayExtra(EXTRA_ADDRESS_MARSHALLED);
+      parcel.unmarshall(marshalled, 0, marshalled.length);
+      parcel.setDataPosition(0);
+      address = parcel.readParcelable(getClassLoader());
+      parcel.recycle();
+    }
+
+    boolean hasResolvedDestination = threadId != -1 && address != null && distributionType != -1;
+
+    if (!hasResolvedDestination && animate) {
+      ViewUtil.fadeIn(fragmentContainer, 300);
+      ViewUtil.fadeOut(progressWheel, 300);
+    } else if (!hasResolvedDestination) {
+      fragmentContainer.setVisibility(View.VISIBLE);
+      progressWheel.setVisibility(View.GONE);
+    } else {
+      createConversation(threadId, address, distributionType);
+    }
+  }
+
+  private void createConversation(long threadId, Address address, int distributionType) {
     final Intent intent = getBaseShareIntent(ConversationActivity.class);
-    intent.putExtra(ConversationActivity.RECIPIENTS_EXTRA, recipients.getIds());
+    intent.putExtra(ConversationActivity.ADDRESS_EXTRA, address);
     intent.putExtra(ConversationActivity.THREAD_ID_EXTRA, threadId);
     intent.putExtra(ConversationActivity.DISTRIBUTION_TYPE_EXTRA, distributionType);
 
@@ -166,19 +209,18 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
   private Intent getBaseShareIntent(final @NonNull Class<?> target) {
     final Intent intent      = new Intent(this, target);
     final String textExtra   = getIntent().getStringExtra(Intent.EXTRA_TEXT);
-    final Uri    streamExtra = getIntent().getParcelableExtra(Intent.EXTRA_STREAM);
-    final String type        = streamExtra != null ? getMimeType(streamExtra)
-                                                   : MediaUtil.getCorrectedMimeType(getIntent().getType());
     intent.putExtra(ConversationActivity.TEXT_EXTRA, textExtra);
-    if (resolvedExtra != null) intent.setDataAndType(resolvedExtra, type);
+    if (resolvedExtra != null) intent.setDataAndType(resolvedExtra, mimeType);
 
     return intent;
   }
 
-  private String getMimeType(Uri uri) {
-    final String type = MediaUtil.getMimeType(getApplicationContext(), uri);
-    return type == null ? MediaUtil.getCorrectedMimeType(getIntent().getType())
-                        : type;
+  private String getMimeType(@Nullable Uri uri) {
+    if (uri != null) {
+      final String mimeType = MediaUtil.getMimeType(getApplicationContext(), uri);
+      if (mimeType != null) return mimeType;
+    }
+    return MediaUtil.getCorrectedMimeType(getIntent().getType());
   }
 
   private class ResolveMediaTask extends AsyncTask<Uri, Void, Uri> {
@@ -195,12 +237,36 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
           return null;
         }
 
-        InputStream input = context.getContentResolver().openInputStream(uris[0]);
-        if (input == null) {
+        InputStream inputStream;
+
+        if ("file".equals(uris[0].getScheme())) {
+          inputStream = openFileUri(uris[0]);
+        } else {
+          inputStream = context.getContentResolver().openInputStream(uris[0]);
+        }
+
+        if (inputStream == null) {
           return null;
         }
 
-        return PersistentBlobProvider.getInstance(context).create(masterSecret, input);
+        Cursor cursor   = getContentResolver().query(uris[0], new String[] {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null);
+        String fileName = null;
+        Long   fileSize = null;
+
+        try {
+          if (cursor != null && cursor.moveToFirst()) {
+            try {
+              fileName = cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME));
+              fileSize = cursor.getLong(cursor.getColumnIndexOrThrow(OpenableColumns.SIZE));
+            } catch (IllegalArgumentException e) {
+              Log.w(TAG, e);
+            }
+          }
+        } finally {
+          if (cursor != null) cursor.close();
+        }
+
+        return PersistentBlobProvider.getInstance(context).create(masterSecret, inputStream, mimeType, fileName, fileSize);
       } catch (IOException ioe) {
         Log.w(TAG, ioe);
         return null;
@@ -210,8 +276,19 @@ public class ShareActivity extends PassphraseRequiredActionBarActivity
     @Override
     protected void onPostExecute(Uri uri) {
       resolvedExtra = uri;
-      ViewUtil.fadeIn(fragmentContainer, 300);
-      ViewUtil.fadeOut(progressWheel, 300);
+      handleResolvedMedia(getIntent(), true);
+    }
+
+    private InputStream openFileUri(Uri uri) throws IOException {
+      FileInputStream fin   = new FileInputStream(uri.getPath());
+      int             owner = FileUtils.getFileDescriptorOwner(fin.getFD());
+      
+      if (owner == -1 || owner == Process.myUid()) {
+        fin.close();
+        throw new IOException("File owned by application");
+      }
+
+      return fin;
     }
   }
 }

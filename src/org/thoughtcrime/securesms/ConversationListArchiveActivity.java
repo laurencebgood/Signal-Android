@@ -6,7 +6,7 @@ import android.support.annotation.NonNull;
 import android.view.MenuItem;
 
 import org.thoughtcrime.securesms.crypto.MasterSecret;
-import org.thoughtcrime.securesms.recipients.Recipients;
+import org.thoughtcrime.securesms.recipients.Recipient;
 import org.thoughtcrime.securesms.util.DynamicLanguage;
 import org.thoughtcrime.securesms.util.DynamicTheme;
 
@@ -26,6 +26,7 @@ public class ConversationListArchiveActivity extends PassphraseRequiredActionBar
   @Override
   protected void onCreate(Bundle icicle, @NonNull MasterSecret masterSecret) {
     getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+    getSupportActionBar().setTitle(R.string.AndroidManifest_archived_conversations);
 
     Bundle bundle = new Bundle();
     bundle.putBoolean(ConversationListFragment.ARCHIVE, true);
@@ -53,12 +54,13 @@ public class ConversationListArchiveActivity extends PassphraseRequiredActionBar
   }
 
   @Override
-  public void onCreateConversation(long threadId, Recipients recipients, int distributionType) {
+  public void onCreateConversation(long threadId, Recipient recipient, int distributionType, long lastSeenTime) {
     Intent intent = new Intent(this, ConversationActivity.class);
-    intent.putExtra(ConversationActivity.RECIPIENTS_EXTRA, recipients.getIds());
+    intent.putExtra(ConversationActivity.ADDRESS_EXTRA, recipient.getAddress());
     intent.putExtra(ConversationActivity.THREAD_ID_EXTRA, threadId);
     intent.putExtra(ConversationActivity.IS_ARCHIVED_EXTRA, true);
     intent.putExtra(ConversationActivity.DISTRIBUTION_TYPE_EXTRA, distributionType);
+    intent.putExtra(ConversationActivity.LAST_SEEN_EXTRA, lastSeenTime);
 
     startActivity(intent);
     overridePendingTransition(R.anim.slide_from_right, R.anim.fade_scale_out);

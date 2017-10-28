@@ -16,28 +16,40 @@
  */
 package org.thoughtcrime.securesms.util;
 
+import android.telephony.SmsMessage;
+import android.util.Log;
+
 public class SmsCharacterCalculator extends CharacterCalculator {
 
-  public static final int SMS_SIZE           = 160;
-  public static final int MULTIPART_SMS_SIZE = 153;
+  private static final String TAG = SmsCharacterCalculator.class.getSimpleName();
 
   @Override
-  public CharacterState calculateCharacters(int charactersSpent) {
-    int maxMessageSize;
+  public CharacterState calculateCharacters(String messageBody) {
+    int[] length;
+    int   messagesSpent;
+    int   charactersSpent;
+    int   charactersRemaining;
 
-    if (charactersSpent <= SMS_SIZE) {
-      maxMessageSize = SMS_SIZE;
-    } else {
-      maxMessageSize = MULTIPART_SMS_SIZE;
+    try {
+      length              = SmsMessage.calculateLength(messageBody, false);
+      messagesSpent       = length[0];
+      charactersSpent     = length[1];
+      charactersRemaining = length[2];
+    } catch (NullPointerException e) {
+      Log.w(TAG, e);
+      messagesSpent       = 1;
+      charactersSpent     = messageBody.length();
+      charactersRemaining = 1000;
     }
 
-    int messagesSpent = charactersSpent / maxMessageSize;
+    int maxMessageSize;
 
-    if (((charactersSpent % maxMessageSize) > 0) || (messagesSpent == 0))
-      messagesSpent++;
-
-    int charactersRemaining = (maxMessageSize * messagesSpent) - charactersSpent;
-
+    if (messagesSpent > 0) {
+      maxMessageSize = (charactersSpent + charactersRemaining) / messagesSpent;
+    } else {
+      maxMessageSize = (charactersSpent + charactersRemaining);
+    }
+    
     return new CharacterState(messagesSpent, charactersRemaining, maxMessageSize);
   }
 }
